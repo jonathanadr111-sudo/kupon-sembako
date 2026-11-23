@@ -1,4 +1,4 @@
-const CACHE = 'kupon-sembako-v2';
+const CACHE = 'kupon-sembako-v3';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
