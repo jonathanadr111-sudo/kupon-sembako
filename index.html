@@ -60,6 +60,17 @@ dialog{border:1px solid var(--bd);border-radius:16px;background:var(--card);colo
 dialog::backdrop{background:#0007}
 dialog canvas{max-width:100%;height:auto;border-radius:8px;display:block;margin:0 auto}
 .hide{display:none!important}
+#pop{border:0;border-radius:18px;padding:0;width:92%;max-width:380px;background:var(--card);color:var(--tx);overflow:hidden}
+#pop::backdrop{background:#000a}
+.pophead{padding:22px 16px 20px;text-align:center;color:#fff}
+.pophead.ok{background:var(--ok)}.pophead.wr{background:var(--wr)}.pophead.no{background:var(--bad)}.pophead.ask{background:var(--ac)}
+.popicon{font-size:42px;line-height:1;font-weight:700}
+.poptitle{font-size:25px;font-weight:800;letter-spacing:.5px;margin-top:6px}
+.popname{font-size:23px;font-weight:700;margin-top:12px;overflow-wrap:anywhere}
+.popmeta{font-size:14px;opacity:.92;margin-top:4px}
+#pop .btn{display:block;width:calc(100% - 28px);margin:10px 14px}
+#pop .btn:last-child{margin-bottom:14px}
+#pop .btn.big{padding:17px;font-size:18px;font-weight:700}
 #boot{text-align:center;padding:40px 16px;color:var(--mut)}
 .sep{height:1px;background:var(--bd);margin:14px 0}
 details summary{cursor:pointer;color:var(--mut);font-size:14px}
@@ -166,6 +177,10 @@ details summary{cursor:pointer;color:var(--mut);font-size:14px}
           <input id="setSub" placeholder="tunjukkan saat pengambilan">
           <label class="mut">Nama petugas (tercatat saat klaim)</label>
           <input id="setWho" placeholder="Petugas">
+          <label class="row" style="margin-top:14px;align-items:center">
+            <input type="checkbox" id="setSound" style="width:auto;flex:0 0 auto;margin:0">
+            <span class="mut" style="margin:0">Bunyi saat validasi</span>
+          </label>
           <div class="row" style="margin-top:10px"><button class="btn pri" id="saveSet">Simpan</button><span class="mut" id="setMsg"></span></div>
         </div>
 
@@ -194,6 +209,17 @@ details summary{cursor:pointer;color:var(--mut);font-size:14px}
   </div>
   <div class="row" style="margin-top:8px"><button class="btn grow" id="prev">Sebelumnya</button><button class="btn grow" id="next">Berikutnya</button><button class="btn grow" id="cl">Tutup</button></div>
   <p class="mut" id="dmeta" style="text-align:center;margin:10px 0 0"></p>
+</dialog>
+
+<dialog id="pop">
+  <div class="pophead ask" id="popHead">
+    <div class="popicon" id="popIcon">?</div>
+    <div class="poptitle" id="popTitle">KONFIRMASI</div>
+    <div class="popname" id="popName"></div>
+    <div class="popmeta" id="popMeta"></div>
+  </div>
+  <button class="btn pri big" id="popOk">Sembako diterima</button>
+  <button class="btn" id="popNo">Batal</button>
 </dialog>
 
 <div id="print"></div>
@@ -10349,15 +10375,25 @@ function rndCode(){
   for(i=0;i<8;i++)o+=AL[a[i]%AL.length];
   return o;
 }
-function beep(kind){
+function sound(kind){
+  if(DB&&DB.s&&DB.s.sound===false)return;
   try{
     var C=window.AudioContext||window.webkitAudioContext;if(!C)return;
-    if(!beep.ctx)beep.ctx=new C();
-    var c=beep.ctx,o=c.createOscillator(),g=c.createGain();
-    o.type='sine';o.frequency.value=kind==='ok'?880:520;
-    g.gain.value=0.09;o.connect(g);g.connect(c.destination);
-    var t=c.currentTime;o.start(t);o.frequency.setValueAtTime(kind==='ok'?1180:430,t+0.09);
-    g.gain.exponentialRampToValueAtTime(0.001,t+0.22);o.stop(t+0.24);
+    if(!sound.ctx)sound.ctx=new C();
+    var c=sound.ctx;
+    if(c.state==='suspended'&&c.resume)try{c.resume()}catch(e){}
+    var notes=kind==='ok'?[523.25,659.25,783.99]:(kind==='wr'?[440,349.23]:[311.13,233.08]);
+    notes.forEach(function(f,i){
+      var o=c.createOscillator(),g=c.createGain();
+      o.type=kind==='ok'?'sine':'triangle';
+      o.frequency.value=f;
+      var t0=c.currentTime+i*0.105;
+      g.gain.setValueAtTime(0.0001,t0);
+      g.gain.exponentialRampToValueAtTime(kind==='ok'?0.22:0.14,t0+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+0.32);
+      o.connect(g);g.connect(c.destination);
+      o.start(t0);o.stop(t0+0.36);
+    });
   }catch(e){}
 }
 function vib(p){if(navigator.vibrate)try{navigator.vibrate(p)}catch(e){}}
@@ -10586,10 +10622,12 @@ function fillSet(){
   var s=DB.s||{};
   storeInfo();
   $('setTitle').value=s.title||'';$('setSub').value=s.sub||'';$('setWho').value=s.who||'';
+  $('setSound').checked=s.sound!==false;
   $('brand').textContent=s.title&&s.title!=='Kupon Sembako'?s.title:'';
 }
 $('saveSet').onclick=function(){
   DB.s.title=$('setTitle').value.trim();DB.s.sub=$('setSub').value.trim();DB.s.who=$('setWho').value.trim();
+  DB.s.sound=$('setSound').checked;
   save(DB);fillSet();$('setMsg').textContent='Tersimpan.';setTimeout(function(){$('setMsg').textContent=''},1500);
 };
 $('pinSave').onclick=function(){
@@ -10604,27 +10642,77 @@ $('reset').onclick=function(){
 };
 
 /* ---------- scan / klaim ---------- */
-var busy=false,lastCode='',lastAt=0,cooldown=0;
-function show2(kind,title,sub){
+var busy=false,lastCode='',cooldown=0,popOpen=false,pending=null,popTimer=0;
+
+function banner(kind,title,sub){
   var r=$('res');
   r.innerHTML='<div class="res '+kind+'"><h2></h2><div></div></div>';
   var box=r.firstChild;
   box.querySelector('h2').textContent=title;
   box.querySelector('div').textContent=sub||'';
-  if(kind==='ok'){beep('ok');vib(90)}else if(kind==='wr'||kind==='no'){beep('bad');vib([70,60,70])}
 }
+
+function pop(mode,title,name,meta,autoMs){
+  popOpen=true;
+  $('popHead').className='pophead '+mode;
+  $('popIcon').textContent=mode==='ok'?'✓':mode==='ask'?'?':mode==='wr'?'!':'×';
+  $('popTitle').textContent=title;
+  $('popName').textContent=name||'';
+  $('popMeta').textContent=meta||'';
+  $('popOk').classList.toggle('hide',mode!=='ask');
+  $('popNo').textContent=mode==='ask'?'Batal':'Tutup';
+  $('popNo').classList.toggle('pri',mode!=='ask');
+  clearTimeout(popTimer);
+  try{if(!$('pop').open)$('pop').showModal()}catch(e){}
+  if(autoMs)popTimer=setTimeout(closePop,autoMs);
+}
+function closePop(){
+  clearTimeout(popTimer);popOpen=false;pending=null;
+  try{$('pop').close()}catch(e){}
+}
+$('popNo').onclick=function(){closePop();cooldown=Date.now()+1200};
+$('pop').addEventListener('cancel',function(e){e.preventDefault();closePop();cooldown=Date.now()+1200});
+$('pop').addEventListener('close',function(){popOpen=false;pending=null});
+
 function claim(raw){
   var code=String(raw||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
   if(!code){return}
   if(Date.now()<cooldown&&code===lastCode){return}
   lastCode=code;
   var v=DB.v[code];
-  if(!v){show2('no','TIDAK ADA','Kode '+code+' tidak terdaftar di HP ini');cooldown=Date.now()+2500;return}
-  if(v.at){show2('wr','SUDAH DIAMBIL',v.n+' · '+fmt(v.at));cooldown=Date.now()+3500;return}
-  v.at=Date.now();v.by=(DB.s&&DB.s.who)||'petugas';save(DB);
-  show2('ok','VALID ✓',v.n);
-  cooldown=Date.now()+3500;
+  if(!v){
+    banner('no','TIDAK ADA','Kode '+code+' tidak terdaftar di HP ini');
+    sound('no');vib([70,60,70]);
+    pop('no','TIDAK ADA','Kode '+code,'Kupon ini tidak ada di daftar acara',4000);
+    cooldown=Date.now()+2500;
+    return;
+  }
+  if(v.at){
+    banner('wr','SUDAH DIAMBIL',v.n+' · '+fmt(v.at));
+    sound('wr');vib([70,60,70]);
+    pop('wr','SUDAH DIAMBIL',v.n,'Diambil '+fmt(v.at),5000);
+    cooldown=Date.now()+3500;
+    return;
+  }
+  pending={code:code};
+  banner('info','SIAP DICATAT',v.n);
+  vib(45);
+  pop('ask','KONFIRMASI',v.n,'Kode '+code);
 }
+
+$('popOk').onclick=function(){
+  if(!pending){closePop();return}
+  var v=DB.v[pending.code];
+  if(!v||v.at){closePop();return}
+  v.at=Date.now();v.by=(DB.s&&DB.s.who)||'petugas';
+  save(DB);
+  var nama=v.n,waktu=fmt(v.at);
+  pending=null;
+  banner('ok','VALID ✓',nama);
+  sound('ok');vib(120);
+  pop('ok','TERCATAT',nama,waktu,2600);
+  cooldown=Date.now()+2500;
+};
 
 /* kamera */
 var stream=null,raf=0;
@@ -10638,7 +10726,7 @@ $('cam').onclick=async function(){
   if(stream){stopCam();return}
   var v=$('vid');
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    show2('info','KAMERA TIDAK TERSEDIA','Pakai Foto QR atau ketik kode');return;
+    banner('info','KAMERA TIDAK TERSEDIA','Pakai Foto QR atau ketik kode');return;
   }
   try{
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
@@ -10648,12 +10736,13 @@ $('cam').onclick=async function(){
     tick();
   }catch(err){
     stream=null;$('vid').classList.add('off');$('idle').classList.remove('hide');
-    show2('info','KAMERA DITOLAK','Pakai tombol Foto QR atau ketik kode');
+    banner('info','KAMERA DITOLAK','Pakai tombol Foto QR atau ketik kode');
   }
 };
 function tick(){
   var v=$('vid');
   if(!stream){return}
+  if(popOpen){raf=requestAnimationFrame(tick);return}
   if(v.readyState>=2&&v.videoWidth){
     try{
       var c=tick.c||(tick.c=document.createElement('canvas'));
@@ -10690,10 +10779,10 @@ $('shot').onchange=function(e){
     try{r=jsQR(d.data,c.width,c.height,{inversionAttempts:'attemptBoth'})}catch(err){}
     URL.revokeObjectURL(url);
     if(r&&r.data)claim(r.data);
-    else show2('info','QR TIDAK TERBACA','Dekatkan kamera, pastikan QR tidak terlipat, lalu foto ulang');
+    else banner('info','QR TIDAK TERBACA','Dekatkan kamera, pastikan QR tidak terlipat, lalu foto ulang');
     e.target.value='';
   };
-  im.onerror=function(){URL.revokeObjectURL(url);show2('info','FOTO GAGAL DIBACA','Coba lagi');e.target.value=''};
+  im.onerror=function(){URL.revokeObjectURL(url);banner('info','FOTO GAGAL DIBACA','Coba lagi');e.target.value=''};
   im.src=url;
 };
 
