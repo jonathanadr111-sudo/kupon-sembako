@@ -2,6 +2,8 @@
 
 Kupon sembako ber-QR untuk pembagian di gereja. Satu HP petugas, jalan offline setelah dibuka sekali.
 
+Alamat: https://jonathanadr111-sudo.github.io/kupon-sembako/
+
 ## Pakai
 
 1. Buka halaman ini di Chrome HP, lalu menu Chrome > **Tambahkan ke layar utama**.

@@ -1,4 +1,4 @@
-const CACHE = 'kupon-sembako-v1';
+const CACHE = 'kupon-sembako-v2';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
@@ -16,9 +16,25 @@ self.addEventListener('activate', function (e) {
   );
 });
 
+// Halaman (navigasi): coba jaringan dulu supaya pembaruan langsung terpakai, kalau offline pakai simpanan.
+// Berkas lain: simpanan dulu, karena jarang berubah.
 self.addEventListener('fetch', function (e) {
   const r = e.request;
   if (r.method !== 'GET') return;
+  if (r.mode === 'navigate') {
+    e.respondWith(
+      fetch(r).then(function (res) {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put('./index.html', copy); });
+        }
+        return res;
+      }).catch(function () {
+        return caches.match('./index.html').then(function (hit) { return hit || caches.match('./'); });
+      })
+    );
+    return;
+  }
   e.respondWith(
     caches.match(r, { ignoreSearch: true }).then(function (hit) {
       if (hit) return hit;
@@ -28,8 +44,6 @@ self.addEventListener('fetch', function (e) {
           caches.open(CACHE).then(function (c) { c.put(r, copy); });
         }
         return res;
-      }).catch(function () {
-        return caches.match('./index.html');
       });
     })
   );
